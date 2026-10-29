@@ -1,0 +1,71 @@
+# Everything on the profile that someone writes by hand lives here.
+# scripts/build.py adds the live numbers and redraws the images in assets/.
+
+user = "omChauhanDev"
+
+# The opening sentence. The first part is set in full colour, the rest in grey.
+statement = ["I build voice agents for consumer-goods sales", "and harden the open-source frameworks they run on."]
+
+package = "pipecat-tts-cache"
+
+# Merged PRs in these repositories are left out of every count.
+exclude_repos = ["c4coderandcreator/Flavour-Fusion", "yash19sinha/coffee-bean"]
+
+# The cards, two to a row, in reading order. Cards in the same row need the same size.
+
+[[cards]]
+kind = "project"
+org = "pipecat-ai"
+repo = "pipecat-ai/pipecat"
+rank_repo = "pipecat-ai/pipecat"
+label = "pipecat-ai"
+logo = "logos/pipecat-ai.png"
+title = "Pipecat"
+text = "Daily’s open-source voice agent framework."
+
+[[cards]]
+kind = "areas"
+org = "pipecat-ai"
+label = "Pipecat PRs by area"
+areas = [
+  "Audio transports and pacing",
+  "Voice activity detection",
+  "Interruptions and frame queues",
+  "Function calling and MCP",
+  "Gemini, Deepgram, Krisp, ElevenLabs",
+]
+
+[[cards]]
+kind = "project"
+size = "compact"
+org = "livekit"
+repo = "livekit/agents"
+label = "livekit/agents"
+logo = "logos/livekit.png"
+title = "LiveKit Agents"
+text = "LiveKit’s realtime voice agent framework."
+
+[[cards]]
+kind = "project"
+size = "compact"
+org = "elevenlabs"
+repo = "elevenlabs/elevenlabs-mcp"
+label = "elevenlabs/elevenlabs-mcp"
+logo = "logos/elevenlabs.png"
+title = "ElevenLabs MCP"
+text = "Official Model Context Protocol server."
+
+[[cards]]
+kind = "total"
+label = "Upstream"
+title = "Merged pull requests"
+
+[[cards]]
+kind = "project"
+org = "WikiEducationFoundation"
+label = "summerofcode.withgoogle.com"
+logo = "logos/gsoc-sun.svg"
+title = "Google Summer of Code"
+text = "With Wikimedia, 2024: replaced JSON files with in-app training-module authoring."
+meta = "350-hour project"
+link = "https://summerofcode.withgoogle.com/archive/2024/projects/RQO5V72p"
