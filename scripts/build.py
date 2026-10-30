@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Redraw the profile README from profile.toml and live GitHub and PyPI numbers.
+"""Redraw the profile README from profile.toml and live GitHub numbers.
 
     pip install -r scripts/requirements.txt
     GITHUB_TOKEN=$(gh auth token) python scripts/build.py
@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import json
 import os
@@ -16,7 +17,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
 from svgtext import Font, num
@@ -24,7 +25,6 @@ from svgtext import Font, num
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 FONTS = ASSETS / "fonts"
-CACHE = ASSETS / "data.json"
 CONFIG = tomllib.loads((ROOT / "profile.toml").read_text())
 USER = CONFIG["user"]
 RAW = f"https://raw.githubusercontent.com/{USER}/{USER}/main/assets"
@@ -61,7 +61,7 @@ CARD_TIERS = [  # first match wins, so narrowest first
 STATEMENT_DRAWINGS = {"phone-": (340, 24, 31), "w420-": (420, 28, 36)}
 STATEMENT_TIERS = [("phone-", "(max-width: 501px)"), ("w420-", "(max-width: 1099px)")]
 GUTTER = 8                       # transparent edge around each card; two make the gaps
-HEIGHTS = {"tall": 244, "compact": 162}   # before the header band grows (see SHIFT)
+HEIGHTS = {"tall": 244, "story": 181, "compact": 162}   # before the header band grows (see SHIFT)
 PAD = 24
 
 
@@ -140,12 +140,14 @@ def contributor_rank(repo: str) -> tuple[int, int]:
     return rank, total
 
 
-def monthly_downloads(package: str) -> int:
-    # pypistats.org: PyPI downloads over the last 30 days, mirrors excluded. No key needed.
-    req = urllib.request.Request(f"https://pypistats.org/api/packages/{package}/recent",
-                                 headers={"User-Agent": USER})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.load(resp)["data"]["last_month"]
+def pull_requests(refs: list[tuple[str, int]]) -> dict[tuple[str, int], dict]:
+    fields = " ".join(
+        f'p{i}: repository(owner: "{repo.split("/")[0]}", name: "{repo.split("/")[1]}") '
+        f'{{ pullRequest(number: {number}) {{ additions deletions mergedAt url }} }}'
+        for i, (repo, number) in enumerate(refs)
+    )
+    data = graphql(f"query {{ {fields} }}")
+    return {ref: data[f"p{i}"]["pullRequest"] for i, ref in enumerate(refs)}
 
 
 def search_link(*orgs: str) -> str:
@@ -163,19 +165,6 @@ def short(n: int) -> str:
 
 def ordinal(n: int) -> str:
     return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
-
-
-def ago(day: date, today: date) -> str:
-    days = (today - day).days
-    if days <= 0:
-        return "today"
-    if days == 1:
-        return "yesterday"
-    if days < 14:
-        return f"{days} days ago"
-    if days < 60:
-        return f"{days // 7} weeks ago"
-    return day.strftime("%b %Y")
 
 
 def write_if_changed(path: Path, text: str) -> None:
@@ -274,15 +263,6 @@ def figure(svg: Svg, t: dict, left: float, text: str, y: float = 190) -> None:
     svg.text(SEMIBOLD, text, 48, left - SEMIBOLD.left_bearing(text, 48), y, t["fg"], tracking=-1.4)
 
 
-def clamp(text: str, width: float, most: int) -> list[str]:
-    """Wrap to at most `most` lines, ending in an ellipsis if words had to go."""
-    words = text.split()
-    while len(SANS.wrap(" ".join(words), 14.5, width)) > most:
-        words = words[:-1]
-        words[-1] = words[-1].rstrip(",.:;") + "…"
-    return SANS.wrap(" ".join(words), 14.5, width)
-
-
 def meta_right(svg: Svg, t: dict, right: float, text: str, y: float) -> None:
     """Right-aligned footnote whose ink, not its advance, ends flush with the arrow above it."""
     svg.text(MONO, text, 12, right + MONO.right_bearing(text, 12), y, t["muted"], anchor="end")
@@ -322,6 +302,19 @@ def project_card(svg, t, x0, w, card, big, unit, meta, data=None, shrink=False):
     meta_right(svg, t, right, meta, 214 - lift)
 
 
+def story_card(svg, t, x0, w, card, pr, shrink=False):
+    """One merged pull request in a sentence: what was broken and what the change does."""
+    lines = lines_of(card["text"], w - 2 * PAD, 2, card["title"])
+    lift = fit(svg, lines, shrink)
+    left, right = frame(svg, t, x0, w)
+    head(svg, t, left, card["label"], card["title"], card.get("logo"))
+    for i, line in enumerate(lines):
+        svg.text(SANS, line, 14.5, left, 102 + 19 * i, t["muted"])
+    merged = date.fromisoformat(pr["mergedAt"][:10])
+    svg.text(SANS, f"Merged {merged:%b %Y}", 13, left, 151 - lift, t["muted"])
+    meta_right(svg, t, right, f"+{pr['additions']} −{pr['deletions']}", 151 - lift)
+
+
 def compact_card(svg, t, x0, w, card, count, meta):
     """Short card for smaller contributions: no display number."""
     left, right = frame(svg, t, x0, w)
@@ -330,50 +323,6 @@ def compact_card(svg, t, x0, w, card, count, meta):
     x = left + svg.text(MEDIUM, str(count), 13, left, 132, t["fg"])
     svg.text(SANS, " merged pull request" + ("s" if count != 1 else ""), 13, x, 132, t["muted"])
     meta_right(svg, t, right, meta, 132)
-
-
-def areas_card(svg, t, x0, w, card, monthly):
-    footer = [(SANS, "I wrote ", 13), (MONO, CONFIG["package"], 12.5), (SANS, " · ", 13),
-              (MEDIUM, short(monthly), 13), (SANS, " downloads a month", 13)]
-    if sum(font.width(text, size) for font, text, size in footer) > w - 2 * PAD:
-        svg.height += 19   # the footer takes two lines; one card per row, so only this card grows
-    left, right = frame(svg, t, x0, w)
-    band(svg, t, left, card["label"])
-    rows = card["areas"]
-    if len(rows) > 5:
-        raise SystemExit("in pipecat: five areas at most")
-    for i, row in enumerate(rows):
-        y = 76 + 26 * i
-        svg.text(SANS, row, 15, left, y, t["fg"])
-        if i < len(rows) - 1:
-            svg.add(f'<path d="M{num(left)} {num(y + 9.5 + svg.dy)}H{num(right)}" stroke="{t["rule"]}"/>')
-    wrote = [(SANS, "I wrote ", 13, "muted"), (MONO, CONFIG["package"], 12.5, "muted")]
-    usage = [(MEDIUM, short(monthly), 13, "fg"), (SANS, " downloads a month", 13, "muted")]
-    one_line = wrote + [(SANS, " · ", 13, "muted")] + usage
-    lines = [one_line] if sum(f.width(x, z) for f, x, z, _ in one_line) <= right - left else [wrote, usage]
-    for row, runs in enumerate(lines):
-        x = left
-        for font, text, size, tone in runs:
-            x += svg.text(font, text, size, x, 214 + 19 * row, t[tone])
-
-
-def total_card(svg, t, x0, w, card, count, since, newest, merged_ago, alone=False):
-    """The latest merged PR and when it landed sit under the title; the total takes the figure.
-
-    Two-card rows must match heights, so there the title is clipped to one line; a card alone
-    in its row may take a second line and grow by it.
-    """
-    lines = clamp(f"Latest: {newest}", w - 2 * PAD, 2 if alone else 1)
-    grow = 19 * (len(lines) - 1)
-    svg.height += grow
-    left, right = frame(svg, t, x0, w)
-    head(svg, t, left, card["label"], card["title"], card.get("logo"))
-    for i, line in enumerate(lines):
-        svg.text(SANS, line, 14.5, left, 102 + 19 * i, t["muted"])
-    svg.add(f'<circle cx="{num(left + 3.5)}" cy="{num(116 + grow + svg.dy)}" r="3.5" fill="{t["live"]}"/>')
-    svg.text(SANS, f"merged {merged_ago}", 14.5, left + 14, 121 + grow, t["muted"])
-    figure(svg, t, left, str(count), 190 + grow)
-    svg.text(SANS, since, 13, left, 214 + grow, t["muted"])
 
 
 def statement(t: dict, width: int, size: float, leading: float) -> Svg:
@@ -390,41 +339,44 @@ def statement(t: dict, width: int, size: float, leading: float) -> Svg:
 # -------------------------------------------------------------- readme
 
 
+def asset_url(name: str) -> str:
+    """Raw URL with a fingerprint of the file, so GitHub's image proxy never serves an old drawing."""
+    return f"{RAW}/{name}?v={hashlib.sha1((ASSETS / name).read_bytes()).hexdigest()[:10]}"
+
+
 def picture(name: str, alt: str, tiers: list[tuple[str, str]]) -> str:
     """<picture> serving each width tier's drawing, dark first; the light desktop drawing is the fallback."""
     sources = []
     for tag, media in tiers:
-        sources.append(f'<source media="{media} and (prefers-color-scheme: dark)" srcset="{RAW}/{name}-{tag}dark.svg">')
-        sources.append(f'<source media="{media}" srcset="{RAW}/{name}-{tag}light.svg">')
-    sources.append(f'<source media="(prefers-color-scheme: dark)" srcset="{RAW}/{name}-dark.svg">')
+        sources.append(f'<source media="{media} and (prefers-color-scheme: dark)" srcset="{asset_url(f"{name}-{tag}dark.svg")}">')
+        sources.append(f'<source media="{media}" srcset="{asset_url(f"{name}-{tag}light.svg")}">')
+    sources.append(f'<source media="(prefers-color-scheme: dark)" srcset="{asset_url(f"{name}-dark.svg")}">')
     return (f"<picture>{''.join(sources)}"
-            f'<img src="{RAW}/{name}-light.svg" align="top" alt="{html.escape(alt)}">'
+            f'<img src="{asset_url(f"{name}-light.svg")}" align="top" alt="{html.escape(alt)}">'
             "</picture>")
 
 
 def main() -> None:
-    today = datetime.now(timezone.utc).date()
     prs = merged_prs()
     by_org = Counter(pr["repository"]["owner"]["login"] for pr in prs)
-    newest = max(prs, key=lambda pr: pr["mergedAt"])
-    first = min(date.fromisoformat(pr["mergedAt"][:10]) for pr in prs)
-    merged_ago = ago(date.fromisoformat(newest["mergedAt"][:10]), today)
-    repo_stars = stars([c["repo"] for c in CONFIG["cards"] if "repo" in c])
+    total = sum(by_org.values())
+    repo_stars = stars([c["repo"] for c in CONFIG["cards"] if c["kind"] == "project" and "repo" in c])
+    stories = pull_requests([(c["repo"], c["number"]) for c in CONFIG["cards"] if c["kind"] == "pr"])
 
-    cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
-    try:
-        cache["monthly_downloads"] = monthly_downloads(CONFIG["package"])
-    except OSError as err:
-        print(f"pypistats.org unreachable ({err}); keeping {cache.get('monthly_downloads')}")
-    cache.pop("downloads", None)
-    monthly = cache["monthly_downloads"]
-    write_if_changed(CACHE, json.dumps(cache, indent=2) + "\n")
-
-    pictures = []
+    drawn = []   # (file name, alt, link), in reading order
     for i, card in enumerate(CONFIG["cards"]):
         kind, size = card["kind"], card.get("size", "tall")
-        count = by_org.get(card.get("org"), 0)
-        if kind == "project":
+        if kind == "pr":
+            pr = stories[(card["repo"], card["number"])]
+            card = {**card, "label": f"{card['repo']} #{card['number']}"}
+            name = f"pr-{card['repo'].split('/')[1]}-{card['number']}"
+            alt = f"{card['title']}, {card['label']}: {card['text']} +{pr['additions']} −{pr['deletions']}."
+            link = pr["url"]
+
+            def draw(svg, t, x0, w, shrink, card=card, pr=pr):
+                story_card(svg, t, x0, w, card, pr, shrink)
+        else:
+            count = by_org.get(card["org"], 0)
             name = card["title"].lower().replace(" ", "-")
             meta = card.get("meta") or f"{short(repo_stars[card['repo']])} stars"
             prs_line = f"{count} merged pull request{'s' if count != 1 else ''}"
@@ -442,24 +394,6 @@ def main() -> None:
                     compact_card(svg, t, x0, w, card, count, meta)
                 else:
                     project_card(svg, t, x0, w, card, big, unit, meta, extra, shrink)
-        elif kind == "areas":
-            name = f"{card['org']}-areas"
-            alt = (f"Pipecat PRs by area: {', '.join(card['areas'])}. "
-                   f"I wrote {CONFIG['package']}, {short(monthly)} downloads a month.")
-            link = search_link(card["org"])
-
-            def draw(svg, t, x0, w, shrink, card=card):
-                areas_card(svg, t, x0, w, card, monthly)
-        else:
-            name = "merged-upstream"
-            total = sum(by_org.values())
-            since = f"since {first:%B %Y}"
-            alt = (f"{total} pull requests merged upstream since {first:%B %Y}. "
-                   f"Latest: {newest['title']}, merged {merged_ago}.")
-            link = search_link(*by_org)
-
-            def draw(svg, t, x0, w, shrink, card=card, total=total, since=since):
-                total_card(svg, t, x0, w, card, total, since, newest["title"], merged_ago, alone=shrink)
 
         height = HEIGHTS[size] + round(SHIFT)
         for theme, t in THEMES.items():
@@ -468,23 +402,25 @@ def main() -> None:
                 svg = Svg(width, height, alt)
                 draw(svg, t, x0, w, shrink=bool(variant))
                 write_if_changed(ASSETS / f"{name}-{variant}{theme}.svg", str(svg))
-        pictures.append(f'<a href="{html.escape(link)}">{picture(name, alt, CARD_TIERS)}</a>')
+        drawn.append((name, alt, link))
 
     for theme, t in THEMES.items():
         write_if_changed(ASSETS / f"statement-{theme}.svg", str(statement(t, STATEMENT_W, 34, 42)))
         for tag, (width, size, leading) in STATEMENT_DRAWINGS.items():
             write_if_changed(ASSETS / f"statement-{tag}{theme}.svg", str(statement(t, width, size, leading)))
 
-    lead, rest = CONFIG["statement"]
+    everything = html.escape(search_link(*by_org))
+    pictures = [f'<a href="{html.escape(link)}">{picture(name, alt, CARD_TIERS)}</a>' for name, alt, link in drawn]
     rows = ["".join(pictures[j:j + 2]) for j in range(0, len(pictures), 2)]
+    lead, rest = CONFIG["statement"]
     readme = (
         "<!-- Built by scripts/build.py from profile.toml. Edit those; this file is overwritten. -->\n\n"
-        f'<p><a href="{html.escape(search_link(*by_org))}">'
-        f"{picture('statement', f'{lead} {rest}', STATEMENT_TIERS)}</a></p>\n\n"
-        "<p>\n" + "<br>\n".join(rows) + "\n</p>\n"
+        f'<p><a href="{everything}">{picture("statement", f"{lead} {rest}", STATEMENT_TIERS)}</a></p>\n\n'
+        "<p>\n" + "<br>\n".join(rows) + "\n</p>\n\n"
+        f'<p><a href="{everything}">All {total} merged pull requests →</a></p>\n'
     )
     write_if_changed(ROOT / "README.md", readme)
-    print(f"{sum(by_org.values())} merged PRs across {len(by_org)} organizations; latest {newest['mergedAt'][:10]}")
+    print(f"{total} merged PRs across {len(by_org)} organizations")
 
 
 if __name__ == "__main__":

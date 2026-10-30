@@ -6,12 +6,11 @@ user = "omChauhanDev"
 # The opening sentence. The first part is set in full colour, the rest in grey.
 statement = ["I build low-latency infrastructure for real-time AI", "and harden the open-source frameworks it runs on."]
 
-package = "pipecat-tts-cache"
-
 # Merged PRs in these repositories are left out of every count.
 exclude_repos = ["c4coderandcreator/Flavour-Fusion", "yash19sinha/coffee-bean"]
 
 # The cards, two to a row, in reading order. Cards in the same row need the same size.
+# kind "pr" tells one merged pull request; its diff size and merge date are fetched live.
 
 [[cards]]
 kind = "project"
@@ -34,23 +33,6 @@ meta = "350-hour project"
 link = "https://summerofcode.withgoogle.com/archive/2024/projects/RQO5V72p"
 
 [[cards]]
-kind = "areas"
-org = "pipecat-ai"
-label = "Pipecat PRs by area"
-areas = [
-  "Audio transports and pacing",
-  "Voice activity detection",
-  "Interruptions and frame queues",
-  "Function calling and MCP",
-  "Gemini, Deepgram, Krisp, ElevenLabs",
-]
-
-[[cards]]
-kind = "total"
-label = "Upstream"
-title = "Merged pull requests"
-
-[[cards]]
 kind = "project"
 size = "compact"
 org = "livekit"
@@ -69,3 +51,21 @@ label = "elevenlabs/elevenlabs-mcp"
 logo = "logos/elevenlabs.png"
 title = "ElevenLabs MCP"
 text = "Official Model Context Protocol server."
+
+[[cards]]
+kind = "pr"
+size = "story"
+repo = "pipecat-ai/pipecat"
+number = 5593
+logo = "logos/pipecat-ai.png"
+title = "Telephony audio pacing"
+text = "Phone-call audio drained 3.5× faster than real time; the transports now pace it."
+
+[[cards]]
+kind = "pr"
+size = "story"
+repo = "pipecat-ai/pipecat"
+number = 4244
+logo = "logos/pipecat-ai.png"
+title = "VAD starvation watchdog"
+text = "VAD froze the pipeline if audio stopped mid-speech; a watchdog now ends the turn."
