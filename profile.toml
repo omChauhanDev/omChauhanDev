@@ -4,7 +4,7 @@
 user = "omChauhanDev"
 
 # The opening sentence. The first part is set in full colour, the rest in grey.
-statement = ["I build voice agents for consumer-goods sales", "and harden the open-source frameworks they run on."]
+statement = ["I build low-latency infrastructure for real-time AI", "and harden the open-source frameworks it runs on."]
 
 package = "pipecat-tts-cache"
 
