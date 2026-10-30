@@ -306,7 +306,7 @@ def project_card(svg, t, x0, w, card, big, unit, meta, data=None, shrink=False):
     """Tall card: label, title, up to two lines of text, a large figure with its unit, and a footer.
 
     `data` is an optional (number, words) line set like the compact cards' footers, on the
-    baseline of the second row of the list card beside it.
+    second text line, level with the card beside it.
     """
     lines = lines_of(card["text"], w - 2 * PAD, 1 if data else 2, card["title"])
     lift = fit(svg, lines + ([""] if data else []), shrink)
@@ -315,8 +315,8 @@ def project_card(svg, t, x0, w, card, big, unit, meta, data=None, shrink=False):
     for i, line in enumerate(lines):
         svg.text(SANS, line, 14.5, left, 102 + 19 * i, t["muted"])
     if data:
-        x = left + svg.text(MEDIUM, data[0], 14.5, left, 128, t["fg"])
-        svg.text(SANS, data[1], 14.5, x, 128, t["muted"])
+        x = left + svg.text(MEDIUM, data[0], 14.5, left, 121, t["fg"])
+        svg.text(SANS, data[1], 14.5, x, 121, t["muted"])
     figure(svg, t, left, big, 190 - lift)
     svg.text(SANS, unit, 13, left, 214 - lift, t["muted"])
     meta_right(svg, t, right, meta, 214 - lift)
