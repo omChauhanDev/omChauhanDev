@@ -17,7 +17,6 @@ import tomllib
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import date
 from pathlib import Path
 
 from svgtext import Font, num
@@ -61,7 +60,7 @@ CARD_TIERS = [  # first match wins, so narrowest first
 STATEMENT_DRAWINGS = {"phone-": (340, 24, 31), "w420-": (420, 28, 36)}
 STATEMENT_TIERS = [("phone-", "(max-width: 501px)"), ("w420-", "(max-width: 1099px)")]
 GUTTER = 8                       # transparent edge around each card; two make the gaps
-HEIGHTS = {"tall": 244, "story": 181, "compact": 162}   # before the header band grows (see SHIFT)
+HEIGHTS = {"tall": 244, "compact": 162}   # before the header band grows (see SHIFT)
 PAD = 24
 
 
@@ -143,7 +142,7 @@ def contributor_rank(repo: str) -> tuple[int, int]:
 def pull_requests(refs: list[tuple[str, int]]) -> dict[tuple[str, int], dict]:
     fields = " ".join(
         f'p{i}: repository(owner: "{repo.split("/")[0]}", name: "{repo.split("/")[1]}") '
-        f'{{ pullRequest(number: {number}) {{ additions deletions mergedAt url }} }}'
+        f'{{ pullRequest(number: {number}) {{ merged url }} }}'
         for i, (repo, number) in enumerate(refs)
     )
     data = graphql(f"query {{ {fields} }}")
@@ -213,10 +212,15 @@ def frame(svg: Svg, t: dict, x0: float, w: float) -> tuple[float, float]:
     svg.add(f'<rect x="{num(x0 + .5)}" y="{GUTTER + .5}" width="{num(w - 1)}" '
             f'height="{svg.height - 2 * GUTTER - 1}" rx="6" fill="{t["card"]}" stroke="{t["edge"]}"/>')
     left, right = x0 + PAD, x0 + w - PAD
-    top = BAND_MID - 4.5
+    arrow(svg, t, right, BAND_MID)
+    return left, right
+
+
+def arrow(svg: Svg, t: dict, right: float, mid: float) -> None:
+    """The north-east arrow that marks a link, its ink ending at `right` and centred on `mid`."""
+    top = mid - 4.5
     svg.add(f'<path d="M{num(right - 9)} {num(top)}h9v9M{num(right)} {num(top)}l-10 10" fill="none" stroke="{t["muted"]}" '
             'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>')
-    return left, right
 
 
 LOGO = int(os.environ.get("LOGO_SIZE", "24"))   # organisation mark, px
@@ -226,7 +230,7 @@ LABEL_Y = BAND_MID + 3.4                         # 12 px mono: baseline that cen
 SHIFT = BAND_TOP + LOGO + 28 - 76                # title baseline sits 12 px under the mark, plus cap height
 
 
-def logo_mark(svg: Svg, t: dict, x: float, y: float, path: str) -> None:
+def logo_mark(svg: Svg, t: dict, x: float, y: float, path: str, size: float = LOGO) -> None:
     """An organisation's own mark, unaltered: raster marks as GitHub-style rounded tiles,
     vector marks drawn as they are."""
     file = ASSETS / path
@@ -234,14 +238,16 @@ def logo_mark(svg: Svg, t: dict, x: float, y: float, path: str) -> None:
         source = file.read_text()
         box = [float(v) for v in re.search(r'viewBox="([^"]+)"', source).group(1).split()]
         inner = re.search(r"<svg[^>]*>(.*)</svg>", source, re.S).group(1)
-        svg.add(f'<g transform="translate({num(x)} {num(y)}) scale({LOGO / box[3]:.6g})">{inner}</g>')
+        svg.add(f'<g transform="translate({num(x)} {num(y)}) scale({size / box[3]:.6g})">{inner}</g>')
         return
     data = base64.b64encode(file.read_bytes()).decode()
-    svg.add(f'<clipPath id="logo"><rect x="{num(x)}" y="{num(y)}" width="{LOGO}" height="{LOGO}" rx="5"/></clipPath>'
-            f'<image href="data:image/png;base64,{data}" x="{num(x)}" y="{num(y)}" width="{LOGO}" height="{LOGO}" '
-            'clip-path="url(#logo)"/>'
-            f'<rect x="{num(x + .5)}" y="{num(y + .5)}" width="{LOGO - 1}" height="{LOGO - 1}" rx="4.5" '
-            f'fill="none" stroke="{t["edge"]}"/>')
+    corner = 5 * size / LOGO
+    svg.add(f'<clipPath id="logo"><rect x="{num(x)}" y="{num(y)}" width="{num(size)}" height="{num(size)}" '
+            f'rx="{num(corner)}"/></clipPath>'
+            f'<image href="data:image/png;base64,{data}" x="{num(x)}" y="{num(y)}" width="{num(size)}" '
+            f'height="{num(size)}" clip-path="url(#logo)"/>'
+            f'<rect x="{num(x + .5)}" y="{num(y + .5)}" width="{num(size - 1)}" height="{num(size - 1)}" '
+            f'rx="{num(corner - .5)}" fill="none" stroke="{t["edge"]}"/>')
 
 
 def band(svg: Svg, t: dict, left: float, label: str, logo: str | None = None) -> None:
@@ -302,19 +308,6 @@ def project_card(svg, t, x0, w, card, big, unit, meta, data=None, shrink=False):
     meta_right(svg, t, right, meta, 214 - lift)
 
 
-def story_card(svg, t, x0, w, card, pr, shrink=False):
-    """One merged pull request in a sentence: what was broken and what the change does."""
-    lines = lines_of(card["text"], w - 2 * PAD, 2, card["title"])
-    lift = fit(svg, lines, shrink)
-    left, right = frame(svg, t, x0, w)
-    head(svg, t, left, card["label"], card["title"], card.get("logo"))
-    for i, line in enumerate(lines):
-        svg.text(SANS, line, 14.5, left, 102 + 19 * i, t["muted"])
-    merged = date.fromisoformat(pr["mergedAt"][:10])
-    svg.text(SANS, f"Merged {merged:%b %Y}", 13, left, 151 - lift, t["muted"])
-    meta_right(svg, t, right, f"+{pr['additions']} −{pr['deletions']}", 151 - lift)
-
-
 def compact_card(svg, t, x0, w, card, count, meta):
     """Short card for smaller contributions: no display number."""
     left, right = frame(svg, t, x0, w)
@@ -333,6 +326,74 @@ def statement(t: dict, width: int, size: float, leading: float) -> Svg:
     for i, (line, fill) in enumerate(lines):
         svg.text(MEDIUM, line, size, -MEDIUM.left_bearing(line, size), size + leading * i, fill,
                  tracking=-0.02 * size)
+    return svg
+
+
+# ------------------------------------------------------------ selected
+
+# The full-width block under the cards: a header, then one row per pull request. GitHub links a
+# whole image, so every row is an image of its own and the box is cut across them; each cut
+# falls on the rule between two rows, where a seam from scaling cannot show.
+ROW_WIDE = 560      # from this drawing width up, a row's mark sits beside its title
+ROW_LOGO = 20       # the mark on wide rows; narrow rows use the cards' header band
+ROW_TOP = 32        # wide rows: title baseline, from the row's top rule
+
+
+def slice_box(svg: Svg, t: dict, top: float, bottom: float, rule: bool) -> None:
+    """The block's box as it crosses this slice; whatever lies past the slice's edges is cut off."""
+    svg.add(f'<rect x=".5" y="{num(top + .5)}" width="{svg.width - 1}" height="{num(bottom - top - 1)}" '
+            f'rx="6" fill="{t["card"]}" stroke="{t["edge"]}"/>')
+    if rule:
+        svg.add(f'<path d="M1 .5H{svg.width - 1}" stroke="{t["rule"]}"/>')
+
+
+def selected_head(t: dict, width: int, title: str, more: str) -> Svg:
+    """The block's title, and on its right the way to every merged pull request."""
+    left, right = PAD, width - PAD
+    baseline = GUTTER + PAD + 16
+    size = 22
+    if SEMIBOLD.width(title, size, -0.3) + 16 + SANS.width(more, 13) + 19 > right - left:
+        size, more = 20, more.rsplit(" ", 1)[0]   # phones: "All 89" beside a smaller title
+    svg = Svg(width, baseline + PAD, f"{title}. {more}.")
+    slice_box(svg, t, GUTTER, svg.height + 8, rule=False)
+    svg.text(SEMIBOLD, title, size, left, baseline, t["fg"], tracking=-0.3)
+    arrow(svg, t, right, baseline - 3.6)
+    svg.text(SANS, more, 13, right - 19, baseline, t["muted"], anchor="end")
+    return svg
+
+
+def row_measure(width: int) -> float:
+    """How wide a row's text may run."""
+    return width - 2 * PAD - (ROW_LOGO + 14 if width >= ROW_WIDE else 0)
+
+
+def selected_row(t: dict, width: int, pr: dict, count: int, last: bool) -> Svg:
+    """One pull request: a short title, then what was broken and what the change does, set in
+    `count` lines so that every row of the block has the same height."""
+    left, right = PAD, width - PAD
+    label = f"#{pr['number']}"   # the mark beside it already names the repository
+    lines = SANS.wrap(pr["text"], 14.5, row_measure(width), count)
+    if width >= ROW_WIDE:   # the mark beside the title, the repository at the end of its line
+        x, title_y = left + ROW_LOGO + 14, ROW_TOP
+        if SEMIBOLD.width(pr["title"], 16, -0.1) > right - 19 - 16 - MONO.width(label, 12) - x:
+            raise SystemExit(f"{label}: title '{pr['title']}' runs into the repository at {width} px")
+    else:                   # the cards' header band, then the title and text at full width
+        x, title_y = left, 20 + LOGO + 20
+    text_y = title_y + 21
+    bottom = text_y + 19 * (len(lines) - 1) + 22
+    svg = Svg(width, bottom + (GUTTER if last else 0), f"{pr['title']}, {pr['repo']} {label}: {pr['text']}")
+    slice_box(svg, t, -8, bottom if last else bottom + 8, rule=True)
+    if width >= ROW_WIDE:
+        logo_mark(svg, t, left, title_y - 5.6 - ROW_LOGO / 2, pr["logo"], ROW_LOGO)
+        arrow(svg, t, right, title_y - 4.6)
+        svg.text(MONO, label, 12, right - 19, title_y, t["muted"], anchor="end")
+    else:
+        logo_mark(svg, t, left, 20, pr["logo"])
+        svg.text(MONO, label, 12, left + LOGO + 10, 20 + LOGO / 2 + 3.4, t["muted"])
+        arrow(svg, t, right, 20 + LOGO / 2)
+    svg.text(SEMIBOLD, pr["title"], 16, x, title_y, t["fg"], tracking=-0.1)
+    for i, line in enumerate(lines):
+        svg.text(SANS, line, 14.5, x, text_y + 19 * i, t["muted"])
     return svg
 
 
@@ -360,40 +421,31 @@ def main() -> None:
     prs = merged_prs()
     by_org = Counter(pr["repository"]["owner"]["login"] for pr in prs)
     total = sum(by_org.values())
-    repo_stars = stars([c["repo"] for c in CONFIG["cards"] if c["kind"] == "project" and "repo" in c])
-    stories = pull_requests([(c["repo"], c["number"]) for c in CONFIG["cards"] if c["kind"] == "pr"])
+    repo_stars = stars([c["repo"] for c in CONFIG["cards"] if "repo" in c])
+    selected = CONFIG["selected"]
+    found = pull_requests([(pr["repo"], pr["number"]) for pr in selected["prs"]])
 
     drawn = []   # (file name, alt, link), in reading order
     for i, card in enumerate(CONFIG["cards"]):
-        kind, size = card["kind"], card.get("size", "tall")
-        if kind == "pr":
-            pr = stories[(card["repo"], card["number"])]
-            card = {**card, "label": f"{card['repo']} #{card['number']}"}
-            name = f"pr-{card['repo'].split('/')[1]}-{card['number']}"
-            alt = f"{card['title']}, {card['label']}: {card['text']} +{pr['additions']} −{pr['deletions']}."
-            link = pr["url"]
+        size = card.get("size", "tall")
+        count = by_org.get(card["org"], 0)
+        name = card["title"].lower().replace(" ", "-")
+        meta = card.get("meta") or f"{short(repo_stars[card['repo']])} stars"
+        prs_line = f"{count} merged pull request{'s' if count != 1 else ''}"
+        big, unit, extra = str(count), prs_line.split(" ", 1)[1], None
+        if "rank_repo" in card:
+            rank, people = contributor_rank(card["rank_repo"])
+            if rank:  # the standing among contributors outranks the raw count
+                big, unit, extra = ordinal(rank), f"of {people} contributors", (str(count), prs_line[len(str(count)):])
+        alt = f"{card['title']}: {card['text']} {f'{big} {unit}; ' if extra else ''}{prs_line}. {meta}."
+        link = card.get("link") or search_link(card["org"])
 
-            def draw(svg, t, x0, w, shrink, card=card, pr=pr):
-                story_card(svg, t, x0, w, card, pr, shrink)
-        else:
-            count = by_org.get(card["org"], 0)
-            name = card["title"].lower().replace(" ", "-")
-            meta = card.get("meta") or f"{short(repo_stars[card['repo']])} stars"
-            prs_line = f"{count} merged pull request{'s' if count != 1 else ''}"
-            big, unit, extra = str(count), prs_line.split(" ", 1)[1], None
-            if "rank_repo" in card:
-                rank, people = contributor_rank(card["rank_repo"])
-                if rank:  # the standing among contributors outranks the raw count
-                    big, unit, extra = ordinal(rank), f"of {people} contributors", (str(count), prs_line[len(str(count)):])
-            alt = f"{card['title']}: {card['text']} {f'{big} {unit}; ' if extra else ''}{prs_line}. {meta}."
-            link = card.get("link") or search_link(card["org"])
-
-            def draw(svg, t, x0, w, shrink, card=card, count=count, big=big, unit=unit, meta=meta,
-                     extra=extra, size=size):
-                if size == "compact":
-                    compact_card(svg, t, x0, w, card, count, meta)
-                else:
-                    project_card(svg, t, x0, w, card, big, unit, meta, extra, shrink)
+        def draw(svg, t, x0, w, shrink, card=card, count=count, big=big, unit=unit, meta=meta,
+                 extra=extra, size=size):
+            if size == "compact":
+                compact_card(svg, t, x0, w, card, count, meta)
+            else:
+                project_card(svg, t, x0, w, card, big, unit, meta, extra, shrink)
 
         height = HEIGHTS[size] + round(SHIFT)
         for theme, t in THEMES.items():
@@ -409,15 +461,36 @@ def main() -> None:
         for tag, (width, size, leading) in STATEMENT_DRAWINGS.items():
             write_if_changed(ASSETS / f"statement-{tag}{theme}.svg", str(statement(t, width, size, leading)))
 
-    everything = html.escape(search_link(*by_org))
+    everything = search_link(*by_org)
+    widths = [("", STATEMENT_W)] + list(DRAWINGS.items())
+    more = f"All {total} merged"
+    block = [("selected", f"{selected['title']}. {more}.", everything)]
+    for theme, t in THEMES.items():
+        for tag, width in widths:
+            write_if_changed(ASSETS / f"selected-{tag}{theme}.svg", str(selected_head(t, width, selected["title"], more)))
+    counts = {width: max(len(SANS.wrap(pr["text"], 14.5, row_measure(width))) for pr in selected["prs"])
+              for _, width in widths}
+    for i, pr in enumerate(selected["prs"]):
+        found_pr = found[(pr["repo"], pr["number"])]
+        if not found_pr["merged"]:
+            raise SystemExit(f"{pr['repo']} #{pr['number']} is not merged")
+        name = f"selected-{pr['repo'].split('/')[1]}-{pr['number']}"
+        last = i == len(selected["prs"]) - 1
+        for theme, t in THEMES.items():
+            for tag, width in widths:
+                svg = selected_row(t, width, pr, counts[width], last)
+                write_if_changed(ASSETS / f"{name}-{tag}{theme}.svg", str(svg))
+        block.append((name, svg.label, found_pr["url"]))
+
     pictures = [f'<a href="{html.escape(link)}">{picture(name, alt, CARD_TIERS)}</a>' for name, alt, link in drawn]
     rows = ["".join(pictures[j:j + 2]) for j in range(0, len(pictures), 2)]
+    rows += [f'<a href="{html.escape(link)}">{picture(name, alt, CARD_TIERS)}</a>' for name, alt, link in block]
+    everything = html.escape(everything)
     lead, rest = CONFIG["statement"]
     readme = (
         "<!-- Built by scripts/build.py from profile.toml. Edit those; this file is overwritten. -->\n\n"
         f'<p><a href="{everything}">{picture("statement", f"{lead} {rest}", STATEMENT_TIERS)}</a></p>\n\n'
-        "<p>\n" + "<br>\n".join(rows) + "\n</p>\n\n"
-        f'<p><a href="{everything}">All {total} merged pull requests →</a></p>\n'
+        "<p>\n" + "<br>\n".join(rows) + "\n</p>\n"
     )
     write_if_changed(ROOT / "README.md", readme)
     print(f"{total} merged PRs across {len(by_org)} organizations")

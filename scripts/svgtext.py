@@ -7,6 +7,7 @@ Each glyph is drawn once per file and placed with <use>, which keeps files small
 
 from __future__ import annotations
 
+from itertools import combinations
 from pathlib import Path
 
 import uharfbuzz as hb
@@ -83,27 +84,43 @@ class Font:
             x += pos.x_advance * scale + tracking
         return placed, width
 
-    def wrap(self, text: str, size: float, max_width: float) -> list[str]:
-        """Break into as few lines as fit, then even them out so no line is left with one word."""
+    def wrap(self, text: str, size: float, max_width: float, lines: int = 0) -> list[str]:
+        """Break into as few lines as fit, then even them out so no line is left with one word.
+
+        `lines` asks for at least that many, so that texts set side by side can share one shape.
+        """
         words = text.split()
-        lines, line = [], ""
+        greedy, line = [], ""
         for word in words:
             trial = f"{line} {word}".strip()
             if line and self.width(trial, size) > max_width:
-                lines.append(line)
+                greedy.append(line)
                 line = word
             else:
                 line = trial
         if line:
-            lines.append(line)
-        if len(lines) != 2:
-            return lines
-        # Two lines: take the break that keeps both inside max_width with the most even widths.
-        best = lines
-        best_gap = abs(self.width(lines[0], size) - self.width(lines[1], size))
-        for cut in range(1, len(words)):
-            first, second = " ".join(words[:cut]), " ".join(words[cut:])
-            w1, w2 = self.width(first, size), self.width(second, size)
-            if max(w1, w2) <= max_width and abs(w1 - w2) < best_gap:
-                best, best_gap = [first, second], abs(w1 - w2)
+            greedy.append(line)
+        count = max(lines, len(greedy))
+        if count == 1 or (count > 2 and not lines):
+            return greedy
+        # Take the breaks that keep every line inside max_width with the most even widths.
+        widths: dict[tuple[int, int], float] = {}
+
+        def measure(a: int, b: int) -> float:
+            if (a, b) not in widths:
+                widths[(a, b)] = self.width(" ".join(words[a:b]), size)
+            return widths[(a, b)]
+
+        # A line left ending on a one-letter word ("a") reads badly, so that costs more than any gap.
+        best, best_cost = greedy, (True, float("inf"))
+        if count == len(greedy):
+            sizes = [self.width(part, size) for part in greedy]
+            best_cost = (any(len(part.split()[-1]) == 1 for part in greedy[:-1]), max(sizes) - min(sizes))
+        for cuts in combinations(range(1, len(words)), count - 1):
+            bounds = (0, *cuts, len(words))
+            sizes = [measure(a, b) for a, b in zip(bounds, bounds[1:])]
+            cost = (any(len(words[cut - 1]) == 1 for cut in cuts), max(sizes) - min(sizes))
+            if max(sizes) <= max_width and cost < best_cost:
+                best = [" ".join(words[a:b]) for a, b in zip(bounds, bounds[1:])]
+                best_cost = cost
         return best

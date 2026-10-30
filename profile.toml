@@ -10,10 +10,8 @@ statement = ["I build low-latency infrastructure for real-time AI", "and harden 
 exclude_repos = ["c4coderandcreator/Flavour-Fusion", "yash19sinha/coffee-bean"]
 
 # The cards, two to a row, in reading order. Cards in the same row need the same size.
-# kind "pr" tells one merged pull request; its diff size and merge date are fetched live.
 
 [[cards]]
-kind = "project"
 org = "pipecat-ai"
 repo = "pipecat-ai/pipecat"
 rank_repo = "pipecat-ai/pipecat"
@@ -23,7 +21,6 @@ title = "Pipecat"
 text = "Daily’s open-source voice agent framework."
 
 [[cards]]
-kind = "project"
 org = "WikiEducationFoundation"
 label = "summerofcode.withgoogle.com"
 logo = "logos/gsoc-sun.svg"
@@ -33,7 +30,6 @@ meta = "350-hour project"
 link = "https://summerofcode.withgoogle.com/archive/2024/projects/RQO5V72p"
 
 [[cards]]
-kind = "project"
 size = "compact"
 org = "livekit"
 repo = "livekit/agents"
@@ -43,7 +39,6 @@ title = "LiveKit Agents"
 text = "LiveKit’s realtime voice agent framework."
 
 [[cards]]
-kind = "project"
 size = "compact"
 org = "elevenlabs"
 repo = "elevenlabs/elevenlabs-mcp"
@@ -52,20 +47,50 @@ logo = "logos/elevenlabs.png"
 title = "ElevenLabs MCP"
 text = "Official Model Context Protocol server."
 
-[[cards]]
-kind = "pr"
-size = "story"
+# The full-width block under the cards, strongest first. Each row links to its pull request;
+# the title names it and the line says what users hit. Keep lines under ~75 characters so
+# rows stay on one line from 580 px up.
+[selected]
+title = "Selected pull requests"
+
+[[selected.prs]]
+repo = "pipecat-ai/pipecat"
+number = 5411
+logo = "logos/pipecat-ai.png"
+title = "Krisp SDK use-after-free"
+text = "Ending one call could crash the worker, taking every other live call with it."
+
+[[selected.prs]]
 repo = "pipecat-ai/pipecat"
 number = 5593
 logo = "logos/pipecat-ai.png"
 title = "Telephony audio pacing"
-text = "Phone-call audio drained 3.5× faster than real time; the transports now pace it."
+text = "Phone bots sent audio 3.5× too fast and could hang up mid-sentence."
 
-[[cards]]
-kind = "pr"
-size = "story"
+[[selected.prs]]
 repo = "pipecat-ai/pipecat"
 number = 4244
 logo = "logos/pipecat-ai.png"
 title = "VAD starvation watchdog"
-text = "VAD froze the pipeline if audio stopped mid-speech; a watchdog now ends the turn."
+text = "If a user muted mid-speech, the bot froze waiting for them to finish."
+
+[[selected.prs]]
+repo = "pipecat-ai/pipecat"
+number = 5502
+logo = "logos/pipecat-ai.png"
+title = "False idle timeouts"
+text = "Calls were dropped as idle while the user was still talking."
+
+[[selected.prs]]
+repo = "pipecat-ai/pipecat"
+number = 4034
+logo = "logos/pipecat-ai.png"
+title = "Persistent MCP sessions"
+text = "Every tool call opened a new connection and redid the MCP handshake."
+
+[[selected.prs]]
+repo = "livekit/agents"
+number = 7147
+logo = "logos/livekit.png"
+title = "Orphaned TTS warm-ups"
+text = "A handoff could leave an OpenAI TTS warm-up running on a closed client."
